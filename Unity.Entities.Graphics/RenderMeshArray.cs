@@ -329,6 +329,11 @@ namespace Unity.Rendering
             NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref chunkArray, AtomicSafetyHandle.GetTempMemoryHandle());
 #endif
             (*em).AddSharedComponentManaged(chunkArray, newArray);
+
+            for (int i = 0; i < chunkArray.Length; i++)
+            {
+                (*em).SetSharedComponentManaged(chunkArray[i], newArray);
+            }
         }
 
         /// <summary>
