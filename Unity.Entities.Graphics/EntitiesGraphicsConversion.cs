@@ -13,6 +13,8 @@ using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.Rendering.Universal;
 #endif
 
+[assembly: RegisterUnityEngineComponentType(typeof(VFXRenderer))]
+
 namespace Unity.Rendering
 {
 #if !UNITY_DISABLE_MANAGED_COMPONENTS
@@ -80,9 +82,11 @@ namespace Unity.Rendering
     {
         public override void Bake(VisualEffect authoring)
         {
+            var vfxRenderer = GetComponent<VFXRenderer>();
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
             AddComponentObject(entity, authoring);
+            AddComponentObject(entity, vfxRenderer);
         }
     }
 
