@@ -13,6 +13,9 @@ using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.Rendering.Universal;
 #endif
 
+[assembly: RegisterUnityEngineComponentType(typeof(VFXRenderer))]
+[assembly: RegisterGenericComponentType(typeof(CompanionComponent<VFXRenderer>))]
+
 namespace Unity.Rendering
 {
 #if !TINY_0_22_0_OR_NEWER
@@ -81,10 +84,21 @@ namespace Unity.Rendering
     {
         public override void Bake(VisualEffect authoring)
         {
+            var vfxRenderer = GetComponent<VFXRenderer>();
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
             this.AddCompanion(entity, authoring);
+            this.AddCompanion(entity, vfxRenderer);
         }
+
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+        static void AddVfxRendererAsCompanionComponentType()
+        {
+            TypeManager.Initialize();
+            Unity.Entities.BakingUtility.AddAdditionalCompanionComponentType(typeof(VFXRenderer));
+        }
+#endif
     }
 
     class ParticleSystemCompanionBaker : Baker<ParticleSystem>
