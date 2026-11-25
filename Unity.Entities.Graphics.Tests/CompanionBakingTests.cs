@@ -9,7 +9,6 @@ namespace Unity.Entities.Graphics.Tests
     {
         readonly List<GameObject> m_TestGameObjects = new();
         World m_TestWorld;
-        World m_PreviousWorld;
         EntityManager m_Manager;
 
         static BakingSettings MakeDefaultSettings() => new()
@@ -20,9 +19,8 @@ namespace Unity.Entities.Graphics.Tests
         [SetUp]
         public void SetUp()
         {
-            m_PreviousWorld = World.DefaultGameObjectInjectionWorld;
             m_TestWorld = new World("TestWorld");
-            World.DefaultGameObjectInjectionWorld = m_TestWorld;
+            World.PushWorldStack(m_TestWorld);
             m_Manager = World.DefaultGameObjectInjectionWorld.EntityManager;
         }
 
@@ -33,7 +31,7 @@ namespace Unity.Entities.Graphics.Tests
                 Object.DestroyImmediate(go);
             m_TestGameObjects.Clear();
 
-            World.DefaultGameObjectInjectionWorld = m_PreviousWorld;
+            World.PopWorldStack(m_TestWorld);
             m_TestWorld.Dispose();
         }
 
@@ -43,13 +41,13 @@ namespace Unity.Entities.Graphics.Tests
             var wasSuccessful = CanTypeBeBaked<UnityEngine.Light>();
             Assert.That(wasSuccessful, Is.True);
         }
-
         [Test]
         public void CompanionBaking_Baking_LightProbeProxyVolume_Succeeds()
         {
             var wasSuccessful = CanTypeBeBaked<UnityEngine.LightProbeProxyVolume>();
             Assert.That(wasSuccessful, Is.True);
         }
+#pragma warning restore 0618
 
         [Test]
         public void CompanionBaking_Baking_ReflectionProbe_Succeeds()
@@ -86,12 +84,14 @@ namespace Unity.Entities.Graphics.Tests
             Assert.That(wasSuccessful, Is.True);
         }
 
+#if AUDIO_MODULE
         [Test]
         public void CompanionBaking_Baking_AudioSource_Succeeds()
         {
             var wasSuccessful = CanTypeBeBaked<UnityEngine.AudioSource>();
             Assert.That(wasSuccessful, Is.True);
         }
+#endif
 
 #if SRP_10_0_0_OR_NEWER
         [Test]
@@ -125,7 +125,7 @@ namespace Unity.Entities.Graphics.Tests
             var wasSuccessful = CanTypeBeBaked<UnityEngine.Rendering.ProbeVolume>();
             Assert.That(wasSuccessful, Is.True);
         }
-        
+
         [Test]
         public void CompanionBaking_Baking_ProbeVolumePerSceneData_Succeeds()
         {
@@ -145,7 +145,7 @@ namespace Unity.Entities.Graphics.Tests
                 entity = BakeCompanionComponent<T>(gameObject);
             });
 
-            var component = m_Manager.GetComponentObject<T>(entity);
+            var component = m_Manager.GetCompanion<T>(entity);
             return component != null;
         }
 
@@ -164,7 +164,7 @@ namespace Unity.Entities.Graphics.Tests
             BakingUtility.BakeGameObjects(World.DefaultGameObjectInjectionWorld, new[] {gameObject}, bakingSettings);
             var findEntityQuery = m_Manager.CreateEntityQuery(new EntityQueryDesc
             {
-                All = new[] { new ComponentType(typeof(T)) }
+                All = new[] { new ComponentType(typeof(CompanionComponent<T>)) }
             });
             using var entities = findEntityQuery.ToEntityArray(Allocator.Temp);
             Assume.That(entities.Length, Is.EqualTo(1), $"Could not find an Entity with a component of type {typeof(T)}");

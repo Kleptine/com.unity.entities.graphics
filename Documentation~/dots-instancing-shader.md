@@ -4,7 +4,7 @@ To render entities with Entities Graphics, shaders must be DOTS Instancing compa
 
 ## SRP Shaders
 
-For default Universal Render Pipeline (URP) and High Definition Render Pipeline (HDRP) shaders, they are already DOTS instacing compatible.
+For default Universal Render Pipeline (URP) and High Definition Render Pipeline (HDRP) shaders, they are already DOTS instancing compatible.
 
 ## ShaderGraph
 

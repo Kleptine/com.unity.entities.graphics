@@ -28,6 +28,8 @@ To override color properties, make sure the values are in linear color space. En
 - ThicknessRemap
 - UnlitColor (HDRP/Unlit)
 
+You can also use the same property names with an `HDRPMaterialProperty` prefix, for example `HDRPMaterialPropertyBaseColor`.
+
 ### Supported URP Material overrides
 
 - BaseColor
@@ -39,6 +41,8 @@ To override color properties, make sure the values are in linear color space. En
 - Smoothness
 - SpecColor
 
+You can also use the same property names with a `URPMaterialProperty` prefix, for example `URPMaterialPropertyBaseColor`.
+
 If you want to override a built-in HDRP or URP property not listed here, you can do that with custom Shader Graph Material overrides.
 
 ## Custom Shader Graph Material overrides
@@ -49,7 +53,7 @@ You can create your own custom Shader Graph properties, and expose them to ECS a
 
 1. Select your Shader Graph custom property and view it in the **Graph Inspector**.
 2. Open the **Node Settings** tab.
-3. Enable **Override Property Declaration** then set **Shader Declaration** to **Hybrid Per Instance**.<br/>![](images/HybridInstancingProperty2020-2.png)
+3. Enable **Override Property Declaration** then set **Shader Declaration** to **Hybrid Per Instance**.
 
 ### IComponentData
 
@@ -67,23 +71,29 @@ Ensure that the **Reference** name in Shader Graph and the string name in Materi
 
 ### Burst C# system
 
-Now you can write Burst C# system to animate your Material property:
+Now you can write a Burst C# system to animate your Material property. The following example uses a custom `MyAnimationTime` component to create a different color each frame.
 
-```
-class AnimateMyOwnColorSystem : SystemBase
+```csharp
+using Unity.Burst;
+using Unity.Entities;
+using Unity.Mathematics;
+
+[BurstCompile]
+partial struct AnimateMyOwnColorSystem : ISystem
 {
-   protected override void OnUpdate()
-  {
-       Entities.ForEach((ref MyOwnColor color, in MyAnimationTime t) =>
-          {
-               color.Value = new float4(
-                   math.cos(t.Value + 1.0f),
-                   math.cos(t.Value + 2.0f),
-                   math.cos(t.Value + 3.0f),
-                   1.0f);
-          })
-          .Schedule();
-  }
+    public void OnUpdate(ref SystemState state)
+    {
+        foreach (var (color, t) in SystemAPI.Query<RefRW<MyOwnColor>,
+                                                   RefRO<MyAnimationTime>>())
+        {
+            float timeAnim = t.ValueRO.Value;
+            color.ValueRW.Value = new float4(
+                math.cos(timeAnim + 1.0f),
+                math.cos(timeAnim + 2.0f),
+                math.cos(timeAnim + 3.0f),
+                1.0f);
+        }
+    }
 }
 ```
 

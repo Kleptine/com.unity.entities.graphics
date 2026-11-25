@@ -535,11 +535,28 @@ namespace Unity.Rendering
         /// </summary>
         /// <param name="destinationBuffer">The target buffer to write uploads into.</param>
         /// <param name="bufferChunkSize">The upload buffer chunk size.</param>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="destinationBuffer"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="destinationBuffer"/> is invalid or has an incompatible target type.</exception>
+        /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="bufferChunkSize"/> is less than or equal to zero.</exception>
         public SparseUploader(GraphicsBuffer destinationBuffer, int bufferChunkSize = 16 * 1024 * 1024)
         {
+            if (destinationBuffer == null)
+                throw new ArgumentNullException(nameof(destinationBuffer), "Destination buffer cannot be null.");
+
+            if (!destinationBuffer.IsValid())
+                throw new ArgumentException("Destination buffer is not in a valid state. The buffer may have been disposed or not properly initialized.", nameof(destinationBuffer));
+
+            if ((destinationBuffer.target & GraphicsBuffer.Target.Raw) != GraphicsBuffer.Target.Raw)
+                throw new ArgumentException("Destination buffer must have Raw target type for sparse uploading.", nameof(destinationBuffer));
+
+            if (bufferChunkSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(bufferChunkSize), bufferChunkSize, "Buffer chunk size must be greater than zero.");
+
             m_BufferChunkSize = bufferChunkSize;
 
             m_DestinationBuffer = destinationBuffer;
+
+            var memoryLabel = Memory.CreateLabel("EntitiesGraphics", "Rendering.SparseUploader", Allocator.Persistent);
 
             m_UploadBufferPool = new BufferPool(m_BufferChunkSize / 4, 4, GraphicsBuffer.Target.Raw, GraphicsBuffer.UsageFlags.LockBufferForWrite);
             m_MappedBuffers = new NativeArray<MappedBuffer>();
@@ -547,7 +564,7 @@ namespace Unity.Rendering
             m_FrameData = new List<FrameData>();
 
             m_ThreadData = (ThreadedSparseUploaderData*)Memory.Unmanaged.Allocate(sizeof(ThreadedSparseUploaderData),
-                UnsafeUtility.AlignOf<ThreadedSparseUploaderData>(), Allocator.Persistent);
+                UnsafeUtility.AlignOf<ThreadedSparseUploaderData>(), memoryLabel);
             m_ThreadData->m_Buffers = null;
             m_ThreadData->m_NumBuffers = 0;
             m_ThreadData->m_CurrBuffer = 0;
@@ -574,22 +591,34 @@ namespace Unity.Rendering
         public void Dispose()
         {
             m_UploadBufferPool.Dispose();
-            Memory.Unmanaged.Free(m_ThreadData, Allocator.Persistent);
+            var memoryLabel = Memory.CreateLabel("EntitiesGraphics", "Rendering.SparseUploader", Allocator.Persistent);
+            Memory.Unmanaged.Free(m_ThreadData, memoryLabel);
         }
 
         /// <summary>
         /// Replaces the destination GPU buffer with a new one.
         /// </summary>
         /// <remarks>
-        /// If the new buffer is non-null and copyFromPrevious is true, this method
+        /// If the existing buffer is non-null and copyFromPrevious is true, this method
         /// dispatches a copy operation that copies data from the previous buffer to the new one.
         ///
         /// This is useful when the persistent storage buffer needs to grow.
         /// </remarks>
         /// <param name="buffer">The new buffer to replace the old one with.</param>
         /// <param name="copyFromPrevious">Indicates whether to copy the contents of the old buffer to the new buffer.</param>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="buffer"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="buffer"/> is invalid or has an incompatible target type.</exception>
         public void ReplaceBuffer(GraphicsBuffer buffer, bool copyFromPrevious = false)
         {
+            if (buffer == null)
+                throw new ArgumentNullException(nameof(buffer), "Destination buffer cannot be null.");
+
+            if (!buffer.IsValid())
+                throw new ArgumentException("Destination buffer is not in a valid state. The buffer may have been disposed or not properly initialized.", nameof(buffer));
+
+            if ((buffer.target & GraphicsBuffer.Target.Raw) != GraphicsBuffer.Target.Raw)
+                throw new ArgumentException("Destination buffer must have Raw target type for sparse uploading.", nameof(buffer));
+
             if (copyFromPrevious && m_DestinationBuffer != null)
             {
                 // Since we have no code such as Graphics.CopyBuffer(dst, src) currently

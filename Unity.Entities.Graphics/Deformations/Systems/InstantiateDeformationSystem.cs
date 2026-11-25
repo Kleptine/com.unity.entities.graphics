@@ -1,4 +1,4 @@
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Entities;
 using Unity.Profiling;
 using UnityEngine;

@@ -1,41 +1,62 @@
 # Companion components
 
-This feature allows you to query MonoBehaviour components in ECS system script by attaching MonoBehaviour components to entities, without converting them to IComponentData. This also means that managed companion components do **not** benefit from the fast performance that ECS components have.
+This feature allows you to query `MonoBehaviour` components in ECS systems by attaching them to entities, without converting them to `IComponentData`. The link between an entity and the component it references is stored as `CompanionComponent<T>`, an unmanaged `IComponentData` that wraps a `UnityObjectRef<T>`, so ECS queries can filter on it like any other unmanaged component. Dereferencing the wrapper to reach the underlying `UnityEngine.Component` goes through managed code, so the per-entity work that touches the component itself does not get the fast performance that pure ECS components have.
 
-The following graphics related companion components are supported by Entities Graphics:
+## Supported components
+
+Entities Graphics bakes the following component types into companion components:
 
 - Light
+- LightProbeProxyVolume
 - ReflectionProbe
-- TextMesh
+- TextMesh, together with the MeshRenderer on the same GameObject
 - SpriteRenderer
-- ParticleSystem
+- ParticleSystem, together with the ParticleSystemRenderer on the same GameObject
 - VisualEffect
-- DecalProjector (HDRP)
+- AudioSource
+- DecalProjector (URP and HDRP)
+- HDAdditionalLightData (HDRP)
+- HDAdditionalReflectionData (HDRP)
 - LocalVolumetricFog (HDRP)
 - PlanarReflectionProbe (HDRP)
+- UniversalAdditionalLightData (URP)
 - Volume
-- Volume + Sphere/Box/Capsule/MeshCollider pair (local volumes)
-- Adaptive Probe Volume (Unity 6 and onwards)
+- SphereCollider, BoxCollider, CapsuleCollider, and MeshCollider, together with a Volume on the same GameObject (local volumes)
+- ProbeVolume and ProbeVolumePerSceneData (Adaptive Probe Volumes)
 
-If a MonoBehaviour component is attached to a GameObject and that component is **not** part of the list above, then that component will be stripped from the GameObject by the Companion components system and will no longer exist after conversion. Also note that the transform hierarchy a GameObject is part of will not be maintained by the Companion components system. All converted components are recreated as root GameObjects.
+If a component isn't in the list above, Unity removes it from the companion GameObject during baking. This includes components such as `Animator` and your own `MonoBehaviour` classes. Unity also doesn't preserve the hierarchy of Transform components, and creates every companion GameObject as a root GameObject.
 
-Note that the conversion of Camera (+HDAdditionalCameraData, UniversalAdditionalCameraData) components is disabled by default, because the scene main camera can't be a companion component entity. To enable this conversion, add **HYBRID_ENTITIES_CAMERA_CONVERSION** define to your project settings.
+Unity doesn't bake Camera components (including the `HDAdditionalCameraData` and `UniversalAdditionalCameraData` components) into companion components by default, because the main camera of a scene can't be a companion component entity. To enable this, add a `HYBRID_ENTITIES_CAMERA_CONVERSION` [custom scripting symbol](https://docs.unity3d.com/Manual/custom-scripting-symbols.html).
 
-Unity updates the transform of a companion component entity whenever it updates the LocalToWorld component. Parenting a companion component entity to a standard entity is supported. Companion component entities can be included in subscenes. The managed component is serialized in the subscene.
+## Companion component entities
 
-You can write ECS queries including both IComponentData and managed companion components. However, these queries cannot be Burst compiled and must run in the main thread because managed components aren't thread-safe. To do this, use `foreach()` without the [BurstCompile] flag instead of an [IJobEntity](https://docs.unity3d.com/Packages/com.unity.entities@latest?subfolder=/api/Unity.Entities.IJobEntity.html) with .Schedule().
+Unity updates the transform of a companion component entity whenever it updates the LocalToWorld component. Parenting a companion component entity to a standard entity is supported. Companion component entities can be included in subscenes. Unity serializes the companion GameObject and the components attached to it in the subscene.
+
+## Query companion components
+
+You can write ECS queries on `CompanionComponent<T>` like any other `IComponentData`. The query iteration itself is Burst-friendly, but reading the wrapped `UnityEngine.Component` is a managed call that must run on the main thread, so the system that does the dereference cannot be Burst-compiled and should iterate with `foreach()` rather than scheduling an [IJobEntity](https://docs.unity3d.com/Packages/com.unity.entities@latest?subfolder=/api/Unity.Entities.IJobEntity.html).
 
 An example of setting HDRP Light component intensity:
 
-```C#
+```csharp
 class AnimateHDRPIntensitySystem : SystemBase
 {
     protected override void OnUpdate()
     {
-        foreach(var hdLight in SystemAPI.Query<RefRW<HDLightAdditionalData>>())
+        foreach (var companion in SystemAPI.Query<RefRO<CompanionComponent<HDAdditionalLightData>>>())
         {
-            hdLight.ValueRW.intensity = 1.5f;
+            HDAdditionalLightData hdLight = companion.ValueRO.CompanionRef;
+            hdLight.intensity = 1.5f;
         }
     }
 }
 ```
+
+The implicit conversion from `UnityObjectRef<T>` to `T` resolves the reference back to the live `UnityEngine.Component` instance. As an alternative, `EntityManager.GetCompanion<T>(entity)` returns the same instance given the entity.
+
+
+## Additional resources
+
+- [`IComponentData`](https://docs.unity3d.com/Packages/com.unity.entities@latest?subfolder=/api/Unity.Entities.IComponentData.html)
+- [`EntityManager`](https://docs.unity3d.com/Packages/com.unity.entities@latest?subfolder=/api/Unity.Entities.EntityManager.html)
+- [Upgrade the Entities Graphics package](upgrade-guide.md#update-code-that-reads-companion-components)

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
@@ -210,6 +210,21 @@ namespace Unity.Rendering
                     var meshLod = meshLods[i];
                     var lodGroupEntity = meshLod.Group;
                     var lodMask = meshLod.LODMask;
+
+                    // A renderer can reference a group that is null, in another scene section, or never baked.
+                    // Writing a range that cannot be selected, rather than leaving whatever was there: LODMask 0
+                    // makes the culling job skip the instance before any distance test, and MaxDist 0 stops the
+                    // root range intersecting at any distance.
+                    if (!MeshLODGroupComponent.HasComponent(lodGroupEntity))
+                    {
+                        lodRange[i] = new LODRange { MinDist = float.MaxValue, MaxDist = 0.0f, LODMask = 0 };
+                        rootLODRange[i] = new RootLODRange { LOD = new LODRange { MinDist = float.MaxValue, MaxDist = 0.0f, LODMask = 0 } };
+
+                        meshLod.ParentGroup = Entity.Null;
+                        meshLods[i] = meshLod;
+                        continue;
+                    }
+
                     var lodGroup = MeshLODGroupComponent[lodGroupEntity];
                     var parentMask = lodGroup.ParentMask;
                     var parentGroupEntity = lodGroup.ParentGroup;
@@ -222,7 +237,9 @@ namespace Unity.Rendering
 
                     RootLODRange rootLod;
 
-                    if (parentGroupEntity == Entity.Null)
+                    // A group's parent can be missing the same way a renderer's group can, so it is treated as
+                    // no parent -- which is what Entity.Null already means here.
+                    if (parentGroupEntity == Entity.Null || !MeshLODGroupComponent.HasComponent(parentGroupEntity))
                     {
                         rootLod.LOD.MinDist = 0;
                         rootLod.LOD.MaxDist = 1048576.0f;
@@ -286,6 +303,10 @@ namespace Unity.Rendering
                 {
                     var meshLod = meshLods[i];
                     var lodGroupEntity = meshLod.Group;
+
+                    if (!LODGroupWorldReferencePoint.HasComponent(lodGroupEntity))
+                        continue;
+
                     var lodGroupWorldReferencePoint = LODGroupWorldReferencePoint[lodGroupEntity].Value;
 
                     lodWorldReferencePoint[i] = new LODWorldReferencePoint { Value = lodGroupWorldReferencePoint };
@@ -299,8 +320,9 @@ namespace Unity.Rendering
                     }
                     else
                     {
-                        var parentGroupWorldReferencePoint = LODGroupWorldReferencePoint[parentGroupEntity].Value;
-                        rootPoint.Value = parentGroupWorldReferencePoint;
+                        rootPoint.Value = LODGroupWorldReferencePoint.HasComponent(parentGroupEntity)
+                            ? LODGroupWorldReferencePoint[parentGroupEntity].Value
+                            : new float3(0, 0, 0);
                     }
 
                     rootLODWorldReferencePoint[i] = rootPoint;

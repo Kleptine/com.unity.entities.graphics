@@ -3,7 +3,7 @@ uid: hybrid-render-overview
 ---
 # Entities Graphics
 
-![](images/HybridRendererSplash.png)
+![Futuristic scene featuring highly detailed 3D environments with complex lighting, reflections, and realistic materials.](images/HybridRendererSplash.png)
 
 Entities Graphics provides systems and components for rendering [ECS](https://docs.unity3d.com/Packages/com.unity.entities@latest) entities. Entities Graphics is not a render pipeline: it is a system that collects the data necessary for rendering ECS entities, and sends this data to Unity's existing rendering architecture.
 

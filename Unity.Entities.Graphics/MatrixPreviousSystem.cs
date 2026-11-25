@@ -1,4 +1,4 @@
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
@@ -56,7 +56,9 @@ namespace Unity.Rendering
                 {
                     ComponentType.ReadOnly<SkipBuiltinMaterialPropertyUnity_MatrixPreviousMUpdate>()
                 },
+#pragma warning disable 0618 // Write groups are obsolete. They will be removed in a future release.
                 Options = EntityQueryOptions.FilterWriteGroup
+#pragma warning restore 0618
             });
             m_GroupPrev.SetChangedVersionFilter(new[]
             {

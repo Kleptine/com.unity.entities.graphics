@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
@@ -17,6 +17,7 @@ namespace Unity.Rendering
     {
         private EntityQuery m_ProbeGridQuery;
         private EntityQuery m_ProbeGridAnchorQuery;
+        private bool m_lightProbesDirty;
 
         private readonly EntityQueryDesc m_ProbeGridQueryDesc = new()
         {
@@ -51,12 +52,18 @@ namespace Unity.Rendering
         /// <inheritdoc/>
         protected override void OnCreate()
         {
+            LightProbes.lightProbesUpdated += OnlightProbesUpdated;
             m_ProbeGridQuery = GetEntityQuery(m_ProbeGridQueryDesc);
             m_ProbeGridQuery.SetChangedVersionFilter(gridQueryFilter);
 
             m_ProbeGridAnchorQuery = GetEntityQuery(m_ProbeGridAnchorQueryDesc);
             // Probes with anchors can't use filters because updating the position of the anchor
             // would not update the probes
+        }
+
+        private void OnlightProbesUpdated()
+        {
+            m_lightProbesDirty = true;
         }
 
         internal static bool IsValidLightProbeGrid()
@@ -73,6 +80,11 @@ namespace Unity.Rendering
             {
                 UpdateEntitiesFromGrid();
             }
+        }
+
+        protected override void OnDestroy()
+        {
+            LightProbes.lightProbesUpdated -= OnlightProbesUpdated;
         }
 
         private static void UpdateEntitiesFromAmbientProbe(
@@ -121,6 +133,7 @@ namespace Unity.Rendering
                 //TODO: Bring this off the main thread when we have new c++ API
                 Dependency.Complete();
             }
+
             foreach (var chunk in gridAnchorChunks)
             {
                 var chunkSH = chunk.GetNativeArray(ref SHType);
@@ -142,7 +155,16 @@ namespace Unity.Rendering
                 }
             }
 
+            if (m_lightProbesDirty)
+                m_ProbeGridQuery.ResetFilter();
+
             var gridChunks  = m_ProbeGridQuery.ToArchetypeChunkArray(Allocator.Temp);
+
+            if (m_lightProbesDirty)
+            {
+                m_ProbeGridQuery.SetChangedVersionFilter(gridQueryFilter);
+                m_lightProbesDirty = false;
+            }
 
             if (gridChunks.Length == 0 && gridAnchorChunks.Length == 0)
             {

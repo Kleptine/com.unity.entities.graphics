@@ -14,11 +14,6 @@ The rule of optimizing the rendering with DOTS instancing in entities is very si
 
 If objects are rendered with DOTS instancing, the draw events of these objects will appear as Hybrid Batch Group on the FrameDebugger, with a shader keyword called DOTS_INSTANCING_ON.
 
-
-**For example for a scene having 100 cubes with same material in subscene:**
-
-![](images/entities-graphics-performance-fd1.png)
-
 1. Open and Enable FrameDebugger
 2. Navigate to an opaque object draw call
 3. Select the Hybrid Batch Group
@@ -32,7 +27,7 @@ If objects are rendered with DOTS instancing, the draw events of these objects w
 
 **For a scene having 100 objects in subscene with 5 different materials (different shader variant) and 10 different meshes:**
 
-![](images/entities-graphics-performance-fd2.png)
+![The Frame Debugger window. The frame panel has a DrawOpaqueObjects frame, with a RenderLoop.DrawSRPBatcher subframe, then 5 Hybrid Batch Group subframes. The fifth is selected, and the Output tab shows a 10 x 10 3D grid of spheres, cubes, and capsules.](images/entities-graphics-performance-fd2.png)
 
 1. There are 5 Hybrid Batch Groups as different shader variant breaks the batching
 2. On each of the Hybrid Batch Groups
@@ -44,13 +39,6 @@ If objects are rendered with DOTS instancing, the draw events of these objects w
 ## Using EntitiesGraphicsStatsDrawer
 
 Entities Graphics provides an on-screen GUI showing Culling and Rendering stats. To use EntitiesGraphicsStatsDrawer, create a new GameObject and attach the EntitiesGraphicsStatsDrawer component. Enter playmode, and find the overlay GUI on GameView.
-
-![](images/entities-graphics-performance-sd1.png)
-
-
-**Using the same scene which have 100 objects in subscene with 5 different materials (different shader variant) and 10 different meshes:**
-
-![](images/entities-graphics-performance-sd2.png)
 
 The rough batching efficiency can also be observed by checking Renderered Instance Count per Draw Command:
 * Renderered Instance Count = 200

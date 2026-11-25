@@ -15,7 +15,6 @@ using UnityEngine.Rendering.Universal;
 
 namespace Unity.Rendering
 {
-#if !UNITY_DISABLE_MANAGED_COMPONENTS
 #if !TINY_0_22_0_OR_NEWER
     class LightCompanionBaker : Baker<Light>
     {
@@ -23,7 +22,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
 
 #if UNITY_EDITOR
             // Explicitly store the LightBakingOutput using a component, so we can restore it
@@ -34,15 +33,17 @@ namespace Unity.Rendering
         }
     }
 
+#pragma warning disable CS0618 // Type or member is obsolete
     class LightProbeProxyVolumeCompanionBaker : Baker<LightProbeProxyVolume>
     {
         public override void Bake(LightProbeProxyVolume authoring)
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
+#pragma warning restore CS0618
 
     class ReflectionProbeCompanionBaker : Baker<ReflectionProbe>
     {
@@ -50,7 +51,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -58,11 +59,11 @@ namespace Unity.Rendering
     {
         public override void Bake(TextMesh authoring)
         {
+            var meshRenderer = GetComponent<MeshRenderer>();
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            var meshRenderer = GetComponent<MeshRenderer>();
-            AddComponentObject(entity, authoring);
-            AddComponentObject(entity, meshRenderer);
+            this.AddCompanion(entity, authoring);
+            this.AddCompanion(entity, meshRenderer);
         }
     }
 
@@ -72,7 +73,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -82,7 +83,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -93,20 +94,22 @@ namespace Unity.Rendering
             var particleSystemRenderer = GetComponent<ParticleSystemRenderer>();
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
-            AddComponentObject(entity, particleSystemRenderer);
+            this.AddCompanion(entity, authoring);
+            this.AddCompanion(entity, particleSystemRenderer);
         }
     }
 
+#if AUDIO_MODULE
     class AudioSourceCompanionBaker : Baker<AudioSource>
     {
         public override void Bake(AudioSource authoring)
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
+#endif
 
 #if SRP_10_0_0_OR_NEWER
     class VolumeCompanionBaker : Baker<Volume>
@@ -120,19 +123,19 @@ namespace Unity.Rendering
 
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
 
-            if(sphereCollider != null)
-                AddComponentObject(entity, sphereCollider);
+            if (sphereCollider != null)
+                this.AddCompanion(entity, sphereCollider);
 
-            if(boxCollider != null)
-                AddComponentObject(entity, boxCollider);
+            if (boxCollider != null)
+                this.AddCompanion(entity, boxCollider);
 
-            if(capsuleCollider != null)
-                AddComponentObject(entity, capsuleCollider);
+            if (capsuleCollider != null)
+                this.AddCompanion(entity, capsuleCollider);
 
-            if(meshCollider != null)
-                AddComponentObject(entity, meshCollider);
+            if (meshCollider != null)
+                this.AddCompanion(entity, meshCollider);
         }
     }
 
@@ -151,11 +154,13 @@ namespace Unity.Rendering
                 // Setting companions to Dynamic
                 var entity = GetEntity(TransformUsageFlags.Dynamic);
 #if UNITY_EDITOR
+                // A baked light needs no runtime HDRP data for lighting, but one that drives the
+                // Physically Based Sky still does - the sky is rendered at runtime, never baked.
                 var isBaking = light.lightmapBakeType == LightmapBakeType.Baked;
-                if(!isBaking)
-                    AddComponentObject(entity, authoring);
+                if (!isBaking || authoring.interactsWithSky)
+                    this.AddCompanion(entity, authoring);
 #else
-                AddComponentObject(entity, authoring);
+                this.AddCompanion(entity, authoring);
 #endif // UNITY_EDITOR
             }
         }
@@ -167,7 +172,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -177,7 +182,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -187,7 +192,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 #endif // HDRP_10_0_0_OR_NEWER
@@ -208,9 +213,9 @@ namespace Unity.Rendering
 #if UNITY_EDITOR
                 var isBaking = light.lightmapBakeType == LightmapBakeType.Baked;
                 if (!isBaking)
-                    AddComponentObject(entity, authoring);
+                    this.AddCompanion(entity, authoring);
 #else
-            AddComponentObject(entity, authoring);
+                this.AddCompanion(entity, authoring);
 #endif // UNITY_EDITOR
             }
         }
@@ -224,7 +229,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 #endif // HDRP_10_0_0_OR_NEWER
@@ -235,7 +240,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 #endif // URP_10_0_0_OR_NEWER
@@ -247,7 +252,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -258,7 +263,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 #endif // HDRP_10_0_0_OR_NEWER
@@ -270,7 +275,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 #endif // URP_10_0_0_OR_NEWER
@@ -284,7 +289,7 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 
@@ -294,12 +299,11 @@ namespace Unity.Rendering
         {
             // Setting companions to Dynamic
             var entity = GetEntity(TransformUsageFlags.Dynamic);
-            AddComponentObject(entity, authoring);
+            this.AddCompanion(entity, authoring);
         }
     }
 #endif // SRP_17_0_0_OR_NEWER
 
 #endif // !TINY_0_22_0_OR_NEWER
 
-#endif // !UNITY_DISABLE_MANAGED_COMPONENTS
 }

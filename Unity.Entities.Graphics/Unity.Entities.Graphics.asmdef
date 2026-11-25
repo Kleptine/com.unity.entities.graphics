@@ -16,7 +16,8 @@
         "Unity.RenderPipelines.Universal.Runtime",
         "Unity.RenderPipelines.Core.Runtime",
         "Unity.Deformations",
-        "Unity.Scenes"
+        "Unity.Scenes",
+        "Unity.RenderPipelines.GPUDriven.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -52,14 +53,14 @@
             "define": "UNITY_2022_2_14F1_OR_NEWER"
         },
         {
-          "name": "Unity",
-          "expression": "2022.3.43f1",
-          "define": "UNITY_2022_3_43F1_OR_NEWER"
+            "name": "Unity",
+            "expression": "2022.3.43f1",
+            "define": "UNITY_2022_3_43F1_OR_NEWER"
         },
         {
-          "name": "Unity",
-          "expression": "6000.0.16f1",
-          "define": "UNITY_6000_0_16F1_OR_NEWER"
+            "name": "Unity",
+            "expression": "6000.0.16f1",
+            "define": "UNITY_6000_0_16F1_OR_NEWER"
         },
         {
             "name": "com.unity.render-pipelines.core",
@@ -67,11 +68,10 @@
             "define": "SRP_17_0_0_OR_NEWER"
         },
         {
-            "name": "Unity",
-            "expression": "6000.2.0a7",
-            "define": "UNITY_6000_2_0A7_OR_NEWER"
+            "name": "com.unity.modules.audio",
+            "expression": "1.0.0",
+            "define": "AUDIO_MODULE"
         }
     ],
     "noEngineReferences": false
 }
-

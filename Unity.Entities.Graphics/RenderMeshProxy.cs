@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Core;
 using Unity.Entities;
 using UnityEngine;
@@ -108,15 +108,11 @@ namespace Unity.Rendering
 
     /// <summary>
     /// Defines the mesh and rendering properties of an entity during baking.
-    /// <remarks>  **Obsolete.** Use <see cref="RenderMeshUnmanaged"/> instead.
-    /// Adding the component should be done with <see cref="AddComponentData"/> instead of <see cref="AddSharedComponentManaged"/></remarks>
+    /// <remarks>  **Obsolete.** Use <see cref="RenderMeshUnmanaged"/> instead. It is no longer a component.</remarks>
     /// </summary>
     [Serializable]
-    // Culling system requires a maximum of 128 entities per chunk (See ChunkInstanceLodEnabled)
-    [MaximumChunkCapacity(128)]
-    [TemporaryBakingType]
-    [Obsolete("Replaced by RenderMeshUnmanaged (RemovedAfter Entities 2.0)")]
-    public struct RenderMesh : ISharedComponentData, IEquatable<RenderMesh>
+    [Obsolete("Replaced by RenderMeshUnmanaged")]
+    public struct RenderMesh : IEquatable<RenderMesh>
     {
         /// <summary>
         /// A reference to a [UnityEngine.Mesh](https://docs.unity3d.com/ScriptReference/Mesh.html) object.

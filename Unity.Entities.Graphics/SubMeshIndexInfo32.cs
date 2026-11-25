@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Runtime.CompilerServices;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using UnityEngine;
 
 namespace Unity.Rendering

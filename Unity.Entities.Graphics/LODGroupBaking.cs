@@ -35,5 +35,8 @@ class LODGroupBaker : Baker<LODGroup>
 
         var entity = GetEntity(TransformUsageFlags.Renderable);
         AddComponent(entity, lodGroupData);
+
+        if (authoring.globalIlluminationLOD >= 0)
+            AddComponent(entity, new GlobalIlluminationLOD { Value = authoring.globalIlluminationLOD });
     }
 }

@@ -1,4 +1,4 @@
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;

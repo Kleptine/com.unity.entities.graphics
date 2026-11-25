@@ -12,7 +12,7 @@ using UnityEditor;
 #endif
 
 using System.Runtime.InteropServices;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst;
 using Unity.Burst.Intrinsics;
 using Unity.Collections;
@@ -22,6 +22,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+using AABB = Unity.Mathematics.AABB;
 
 /*
  * Batch-oriented culling.
@@ -531,8 +532,8 @@ namespace Unity.Rendering
     internal unsafe struct IncludeExcludeListFilter
     {
 #if !DISABLE_INCLUDE_EXCLUDE_LIST_FILTERING
-        public NativeParallelHashSet<int> IncludeEntityIndices;
-        public NativeParallelHashSet<int> ExcludeEntityIndices;
+        public NativeParallelHashSet<EntityId> IncludeEntityIndices;
+        public NativeParallelHashSet<EntityId> ExcludeEntityIndices;
         [MarshalAs(UnmanagedType.U1)]
         public bool IsIncludeEnabled;
         [MarshalAs(UnmanagedType.U1)]
@@ -544,8 +545,8 @@ namespace Unity.Rendering
 
         public IncludeExcludeListFilter(
             EntityManager entityManager,
-            NativeArray<int> includeEntityIndices,
-            NativeArray<int> excludeEntityIndices,
+            NativeArray<EntityId> includeEntityIndices,
+            NativeArray<EntityId> excludeEntityIndices,
             Allocator allocator)
         {
             IncludeEntityIndices = default;
@@ -557,26 +558,26 @@ namespace Unity.Rendering
 
             if (IsIncludeEnabled)
             {
-                IncludeEntityIndices = new NativeParallelHashSet<int>(includeEntityIndices.Length, allocator);
+                IncludeEntityIndices = new NativeParallelHashSet<EntityId>(includeEntityIndices.Length, allocator);
                 for (int i = 0; i < includeEntityIndices.Length; ++i)
                     IncludeEntityIndices.Add(includeEntityIndices[i]);
             }
             else
             {
                 // NativeParallelHashSet must be non-null even if empty to be passed to jobs. Otherwise errors happen.
-                IncludeEntityIndices = new NativeParallelHashSet<int>(0, allocator);
+                IncludeEntityIndices = new NativeParallelHashSet<EntityId>(0, allocator);
             }
 
             if (IsExcludeEnabled)
             {
-                ExcludeEntityIndices = new NativeParallelHashSet<int>(excludeEntityIndices.Length, allocator);
+                ExcludeEntityIndices = new NativeParallelHashSet<EntityId>(excludeEntityIndices.Length, allocator);
                 for (int i = 0; i < excludeEntityIndices.Length; ++i)
                     ExcludeEntityIndices.Add(excludeEntityIndices[i]);
             }
             else
             {
                 // NativeParallelHashSet must be non-null even if empty to be passed to jobs. Otherwise errors happen.
-                ExcludeEntityIndices = new NativeParallelHashSet<int>(0, allocator);
+                ExcludeEntityIndices = new NativeParallelHashSet<EntityId>(0, allocator);
             }
         }
 
@@ -596,7 +597,7 @@ namespace Unity.Rendering
             return JobHandle.CombineDependencies(disposeInclude, disposeExclude);
         }
 
-        public bool EntityPassesFilter(int entityIndex)
+        public bool EntityPassesFilter(Entity entityIndex)
         {
             if (IsIncludeEnabled)
             {
@@ -684,8 +685,8 @@ namespace Unity.Rendering
 
             var perInstanceCull = 0 != (chunkCullingData.Flags & EntitiesGraphicsChunkCullingData.kFlagInstanceCulling);
 
-            // Filter out entities that affect lightmap if the cull lighmap shadow casters flag is set
-            bool isLightMapped = chunk.GetSharedComponentIndex(LightMaps) >= 0;
+            // Filter out entities that affect lightmap if the cull lightmap shadow casters flag is set
+            bool isLightMapped = chunk.GetSharedComponentIndex(LightMaps) != -1;
             if (isLightMapped && CullLightmapShadowCasters)
                 return;
 
@@ -762,7 +763,7 @@ namespace Unity.Rendering
 
                         if (IncludeExcludeListFilter.IsEnabled && visible != 0)
                         {
-                            if (!IncludeExcludeListFilter.EntityPassesFilter(chunkEntities[finalIndex].Index))
+                            if (!IncludeExcludeListFilter.EntityPassesFilter(chunkEntities[finalIndex]))
                                 visible = 0;
                         }
 

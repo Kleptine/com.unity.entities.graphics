@@ -4,33 +4,38 @@ uid: changelog
 
 # Changelog
 
-## [1.4.17] - 2025-12-16
-
-### Added
-
+## [7.0.0] - 2026-09-28
 
 ### Changed
 
-* Updated the `com.unity.entities` dependency to version `1.4.4`
+* Starting with Unity 6.4, the package is implemented as a [core package](https://docs.unity3d.com/Manual/pack-core.html) and is distributed alongside each version of the Unity Editor. The Changelog entries won't be updated in this file. For information about the changes in Unity, refer to the [What's new in Unity](https://docs.unity3d.com/Manual/WhatsNew.html) page.
 
-### Fixed
-
-* EntitiesGraphicsSystem holds references to Materials and Meshes so they do not get destroyed, if not unregistered, when Resources.UnloadUnusedAssets is called and they are no more referenced outside of EntitiesGraphicsSystem.
-
-
-
-## [1.4.16] - 2025-10-17
+## [6.7.0] - 2026-07-16
 
 ### Changed
 
-* Updated the `com.unity.entities` dependency to version `1.4.3`
+* Starting with Unity 6.4, the package is implemented as a [core package](https://docs.unity3d.com/Manual/pack-core.html) and is distributed alongside each version of the Unity Editor. The Changelog entries won't be updated in this file. For information about the changes in Unity, refer to the [What's new in Unity](https://docs.unity3d.com/Manual/WhatsNew.html) page.
 
-### Fixed
+## [6.6.0] - 2026-07-09
 
-* Added proper handling for disabling the PresentationSystemGroup
+### Changed
 
+* Starting with Unity 6.4, the package is implemented as a [core package](https://docs.unity3d.com/Manual/pack-core.html) and is distributed alongside each version of the Unity Editor. The Changelog entries won't be updated in this file. For information about the changes in Unity, refer to the [What's new in Unity](https://docs.unity3d.com/Manual/WhatsNew.html) page.
+
+## [6.5.0] - 2025-10-22
+
+### Changed
+
+* Starting with Unity 6.4, the package is implemented as a [core package](https://docs.unity3d.com/Manual/pack-core.html) and is distributed alongside each version of the Unity Editor. The Changelog entries won't be updated in this file. For information about the changes in Unity, refer to the [What's new in Unity](https://docs.unity3d.com/Manual/WhatsNew.html) page.
+
+## [6.4.0] - 2025-10-16
+
+### Changed
+
+* Package is now a core package embedded in Unity.
 
 ## [1.4.15] - 2025-09-05
+
 
 ### Changed
 
@@ -55,6 +60,24 @@ uid: changelog
 
 ### Added
 
+* MeshLOD support
+
+### Changed
+
+* Optimized code in OnPerformCulling to use Burst compilation
+
+### Fixed
+
+* Added proper handling for disabling the PresentationSystemGroup
+
+
+
+
+
+## [1.4.12] - 2025-04-11
+
+### Added
+
 * Added support for the Adaptive Probe Volume component in the Companion GameObject system.
 
 ### Changed
@@ -66,20 +89,6 @@ uid: changelog
 ### Fixed
 
 * OnPerformCulling does an early out when handling empty worlds
-* Fixed a rare null reference issue when using a motion vector pass when renderers had null materials
-
-
-
-## [1.4.9-exp.2] - 2025-03-07
-
-* Note that this version is only intended to be used with `com.unity.entities` version `1.4.0-exp.2`
-
-### Changed
-
-* Optimized code in OnPerformCulling to use Burst compilation
-
-### Fixed
-
 * Fixed a rare null reference issue when using a motion vector pass when renderers had null materials
 
 

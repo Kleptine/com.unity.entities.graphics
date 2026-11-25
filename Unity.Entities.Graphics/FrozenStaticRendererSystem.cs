@@ -24,15 +24,15 @@ namespace Unity.Rendering
             int hasStreamedLOD = 0;
             foreach (var section in sections)
             {
-                group.SetSharedComponentFilterManaged(section);
+                group.SetSharedComponentFilter(section);
                 if (section.Section != 0)
                     hasStreamedLOD = 1;
             }
 
             foreach (var section in sections)
             {
-                group.SetSharedComponentFilterManaged(section);
-                EntityManager.AddSharedComponentManaged(group, new FrozenRenderSceneTag { SceneGUID = section.SceneGUID, SectionIndex = section.Section, HasStreamedLOD = hasStreamedLOD});
+                group.SetSharedComponentFilter(section);
+                EntityManager.AddSharedComponent(group, new FrozenRenderSceneTag { SceneGUID = section.SceneGUID, SectionIndex = section.Section, HasStreamedLOD = hasStreamedLOD});
             }
 
             group.ResetFilter();

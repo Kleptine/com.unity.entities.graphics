@@ -267,7 +267,7 @@ public class MaterialOverrideAssetEditor : Editor
         }
         if (dirtyGameObjects)
         {
-            foreach (var overrideComponent in FindObjectsByType<MaterialOverride>(FindObjectsSortMode.None))
+            foreach (var overrideComponent in FindObjectsByType<MaterialOverride>())
             {
                 if (overrideComponent.overrideAsset == target)
                 {

@@ -1,5 +1,5 @@
 using System;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Collections;
 
 using GraphicsBuffer = UnityEngine.GraphicsBuffer;

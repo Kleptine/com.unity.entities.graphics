@@ -75,7 +75,7 @@ public class MaterialOverrideAsset : ScriptableObject
     {
         Type overrideType = null;
         bool componentExists = false;
-        foreach (var t in TypeManager.GetAllTypes())
+        foreach (var t in TypeManager.AllTypes)
         {
             if (t.Type != null)
             {
@@ -125,7 +125,7 @@ public class MaterialOverrideAsset : ScriptableObject
     /// <inheritdoc/>
     public void OnValidate()
     {
-        foreach (var overrideComponent in FindObjectsByType<MaterialOverride>(FindObjectsSortMode.None))
+        foreach (var overrideComponent in FindObjectsByType<MaterialOverride>())
         {
             if (overrideComponent.overrideAsset == this)
             {

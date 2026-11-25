@@ -3,7 +3,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 
 namespace Unity.Rendering
 {

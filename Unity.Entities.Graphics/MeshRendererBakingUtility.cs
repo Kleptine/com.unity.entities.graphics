@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -178,6 +178,12 @@ namespace Unity.Rendering
             componentFlag.AppendMotionAndProbeFlags(renderMeshDescription, baker.IsStatic());
             componentFlag.AppendPerVertexMotionPassFlag(materials);
             componentFlag.AppendDepthSortedFlag(materials);
+
+            if (mesh.lodCount > 1)
+            {
+                componentFlag |= RenderMeshUtility.EntitiesGraphicsComponentFlags.HasMeshLod;
+            }
+
             lodComponent.AppendLODFlags(ref componentFlag);
             baker.AddComponent(entity, RenderMeshUtility.ComputeComponentTypes(componentFlag));
 
@@ -189,6 +195,18 @@ namespace Unity.Rendering
             baker.SetSharedComponent(entity, renderMeshDescription.FilterSettings);
             baker.SetComponent(entity, new RenderMeshUnmanaged(mesh, renderer.sharedMaterial, subMeshIndexInfo));
             baker.SetComponent(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+
+            if (mesh.lodCount > 1)
+            {
+                baker.SetComponent(entity, new MeshLodInfoComponent()
+                {
+                    lodCount = mesh.lodCount,
+                    lodSlope = mesh.lodSelectionCurve.lodSlope,
+                    lodBias = mesh.lodSelectionCurve.lodBias,
+                });
+                baker.AddComponent(entity, new GlobalIlluminationMeshLod { Value = GetGlobalIlluminationMeshLod(renderer) });
+            }
+
             lodComponent.SetLODComponent(baker, entity);
         }
 
@@ -244,8 +262,25 @@ namespace Unity.Rendering
                 var meshEntity = additionalEntities[subMeshMaterialIndex];
                 baker.SetComponent(meshEntity, new RenderMeshUnmanaged(mesh, materials[subMeshMaterialIndex], new SubMeshIndexInfo32(subMeshMaterialIndex)));
                 baker.SetComponent(meshEntity, renderBounds);
+
+                if (mesh.lodCount > 1)
+                {
+                    baker.AddComponent(meshEntity, new MeshLodInfoComponent()
+                    {
+                        lodCount = mesh.lodCount,
+                        lodSlope = mesh.lodSelectionCurve.lodSlope,
+                        lodBias = mesh.lodSelectionCurve.lodBias,
+                    });
+                    baker.AddComponent(meshEntity, new GlobalIlluminationMeshLod { Value = GetGlobalIlluminationMeshLod(renderer) });
+                }
+
                 lodState.SetLODComponent(baker, meshEntity);
             }
+        }
+
+        static int GetGlobalIlluminationMeshLod(Renderer renderer)
+        {
+            return renderer is MeshRenderer meshRenderer ? meshRenderer.globalIlluminationMeshLod : 0;
         }
 
         static bool ValidateMeshAndMaterials(Renderer authoring, Mesh mesh, Material[] materials)

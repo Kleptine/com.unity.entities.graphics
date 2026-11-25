@@ -1,6 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst.Intrinsics;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -65,7 +65,28 @@ namespace Unity.Rendering
 
         static bool IsScriptableRenderPipelineUsed() => GraphicsSettings.currentRenderPipeline != null;
 
+        static bool? s_IsSupportedOnSystem;
+        static bool s_SubscribedToPipelineTypeChanged;
+
         public static bool IsEntitiesGraphicsSupportedOnSystem()
+        {
+            if (s_IsSupportedOnSystem.HasValue)
+                return s_IsSupportedOnSystem.Value;
+
+            if (!s_SubscribedToPipelineTypeChanged)
+            {
+                RenderPipelineManager.activeRenderPipelineTypeChanged += InvalidateIsSupportedOnSystem;
+                s_SubscribedToPipelineTypeChanged = true;
+            }
+
+            var isSupported = ComputeIsEntitiesGraphicsSupportedOnSystem();
+            s_IsSupportedOnSystem = isSupported;
+            return isSupported;
+        }
+
+        static void InvalidateIsSupportedOnSystem() => s_IsSupportedOnSystem = null;
+
+        static bool ComputeIsEntitiesGraphicsSupportedOnSystem()
         {
             if (!IsScriptableRenderPipelineUsed())
                 return false;

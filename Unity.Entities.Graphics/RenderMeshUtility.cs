@@ -5,7 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -53,6 +53,8 @@ namespace Unity.Rendering
                 ReceiveShadows = renderer.receiveShadows,
                 MotionMode = renderer.motionVectorGenerationMode,
                 StaticShadowCaster = renderer.staticShadowCaster,
+                ForceMeshLod = renderer.forceMeshLod,
+                MeshLodSelectionBias = renderer.meshLodSelectionBias
             };
 
             LightProbeUsage = RenderMeshUtility.StaticLightingModeFromRendererLightmapIndex(renderer.lightmapIndex) == RenderMeshUtility.StaticLightingMode.LightProbes
@@ -70,6 +72,8 @@ namespace Unity.Rendering
         /// <param name="renderingLayerMask">Rendering layer mask</param>
         /// <param name="lightProbeUsage">Light probe usage mode</param>
         /// <param name="staticShadowCaster">Static shadow caster flag</param>
+        /// <param name="forceMeshLod">Force mesh LOD value</param>
+        /// <param name="meshLodSelectionBias">Mesh LOD selection bias</param>
         public RenderMeshDescription(
             ShadowCastingMode shadowCastingMode,
             bool receiveShadows = false,
@@ -77,7 +81,10 @@ namespace Unity.Rendering
             int layer = 0,
             uint renderingLayerMask = 0xffffffff,
             LightProbeUsage lightProbeUsage = LightProbeUsage.Off,
-            bool staticShadowCaster = false)
+            bool staticShadowCaster = false,
+            int forceMeshLod = -1,
+            float meshLodSelectionBias = 0.0f
+            )
         {
             FilterSettings = new RenderFilterSettings
             {
@@ -87,6 +94,8 @@ namespace Unity.Rendering
                 ReceiveShadows = receiveShadows,
                 MotionMode = motionVectorGenerationMode,
                 StaticShadowCaster = staticShadowCaster,
+                ForceMeshLod = forceMeshLod,
+                MeshLodSelectionBias = meshLodSelectionBias
             };
 
             LightProbeUsage = lightProbeUsage;
@@ -113,9 +122,10 @@ namespace Unity.Rendering
             UseRenderMeshArray = 1 << 6,
             LODGroup = 1 << 7,
             PerVertexMotionPass = 1 << 8,
+            HasMeshLod = 1 << 9,
 
             // Count of unique flag combinations
-            PermutationCount = 1 << 9,
+            PermutationCount = 1 << 10
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -183,6 +193,8 @@ namespace Unity.Rendering
                     components.Add(ComponentType.ReadWrite<DepthSorted_Tag>());
                 if (flags.HasFlagFast(EntitiesGraphicsComponentFlags.LODGroup))
                     components.Add(ComponentType.ReadWrite<MeshLODComponent>());
+                if (flags.HasFlagFast(EntitiesGraphicsComponentFlags.HasMeshLod))
+                    components.Add(ComponentType.ReadWrite<MeshLodInfoComponent>());
 
                 return new ComponentTypeSet(components);
             }
@@ -269,9 +281,19 @@ namespace Unity.Rendering
             entityManager.AddComponent(entity, ComputeComponentTypes(componentFlags));
 
             entityManager.SetSharedComponent(entity, renderMeshDescription.FilterSettings);
-            entityManager.SetSharedComponentManaged(entity, renderMeshArray);
+            entityManager.SetSharedComponent(entity, renderMeshArray);
             entityManager.SetComponentData(entity, materialMeshInfo);
-            entityManager.SetComponentData(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+            entityManager.SetComponentData(entity, new RenderBounds { Value = Mathematics.AABBExtensions.ToAABB(mesh.bounds) });
+
+            if (mesh.lodCount > 1)
+            {
+                entityManager.SetComponentData(entity, new MeshLodInfoComponent()
+                {
+                    lodCount = mesh.lodCount,
+                    lodSlope = mesh.lodSelectionCurve.lodSlope,
+                    lodBias = mesh.lodSelectionCurve.lodBias,
+                });
+            }
         }
 
         /// <summary>
@@ -318,7 +340,17 @@ namespace Unity.Rendering
 
             entityManager.SetSharedComponent(entity, renderMeshDescription.FilterSettings);
             entityManager.SetComponentData(entity, materialMeshInfo);
-            entityManager.SetComponentData(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+            entityManager.SetComponentData(entity, new RenderBounds { Value = Mathematics.AABBExtensions.ToAABB(mesh.bounds) });
+
+            if (mesh.lodCount > 1)
+            {
+                entityManager.SetComponentData(entity, new MeshLodInfoComponent()
+                {
+                    lodCount = mesh.lodCount,
+                    lodSlope = mesh.lodSelectionCurve.lodSlope,
+                    lodBias = mesh.lodSelectionCurve.lodBias,
+                });
+            }
         }
 
         private const string kMotionVectorsShaderPass_HDRP_URP = "MotionVectors";

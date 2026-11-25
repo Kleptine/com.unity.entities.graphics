@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -18,6 +18,7 @@ using UnityEngine.Rendering;
 #if UNITY_EDITOR
 using UnityEditor.SceneManagement;
 #endif
+using AABB = Unity.Mathematics.AABB;
 
 namespace Unity.Rendering
 {
@@ -32,8 +33,21 @@ namespace Unity.Rendering
         public BatchMeshID MeshID;
         public ushort SplitMask;
         public ushort SubMeshIndex;
+        public ushort MeshLodIndex;
+
+        // UUM-144036: keep DrawCommandSettings free of implicit padding after the addition of MeshLodIndex
+        // FastHash(this) hashes sizeof(T) bytes incl. any padding, but Equals only compares fields
+        private ushort m_Padding;
+
         public BatchID BatchID;
         private int m_CachedHash;
+
+#if UNITY_ASSERTIONS
+        static DrawCommandSettings()
+        {
+            Assert.IsTrue(UnsafeUtility.SizeOf<DrawCommandSettings>() == 32, "DrawCommandSettings size has changed. Ensure m_Padding is updated to avoid implicit padding.");
+        }
+#endif
 
         public bool Equals(DrawCommandSettings other)
         {
@@ -41,7 +55,8 @@ namespace Unity.Rendering
             bool eq_batch = BatchID == other.BatchID;
             bool eq_rest = math.all(PackedUint4 == other.PackedUint4);
 
-            return eq_batch && eq_rest;
+            bool eq_lod = MeshLodIndex == other.MeshLodIndex;
+            return eq_batch && eq_rest && eq_lod;
         }
 
         private uint4 PackedUint4
@@ -91,6 +106,7 @@ namespace Unity.Rendering
             int cmpSplitMask = SplitMask.CompareTo(other.SubMeshIndex);
             int cmpSubMeshIndex = SubMeshIndex.CompareTo(other.SubMeshIndex);
             int cmpBatchID = BatchID.CompareTo(other.BatchID);
+            int cmpLODIndex = MeshLodIndex.CompareTo(other.MeshLodIndex);
 
             if (cmpFilterIndex != 0) return cmpFilterIndex;
             if (cmpFlags != 0) return cmpFlags;
@@ -98,6 +114,7 @@ namespace Unity.Rendering
             if (cmpMeshID != 0) return cmpMeshID;
             if (cmpSubMeshIndex != 0) return cmpSubMeshIndex;
             if (cmpSplitMask != 0) return cmpSplitMask;
+            if (cmpLODIndex != 0) return cmpLODIndex;
 
             return cmpBatchID;
         }
@@ -113,7 +130,7 @@ namespace Unity.Rendering
 
         public override string ToString()
         {
-            return $"DrawCommandSettings(batchID: {BatchID.value}, materialID: {MaterialID.value}, meshID: {MeshID.value}, submesh: {SubMeshIndex}, filter: {FilterIndex}, flags: {Flags:x}, splitMask: {SplitMask:x})";
+            return $"DrawCommandSettings(batchID: {BatchID.value}, materialID: {MaterialID.value}, meshID: {MeshID.value}, submesh: {SubMeshIndex}, filter: {FilterIndex}, flags: {Flags:x}, splitMask: {SplitMask:x}, MeshLodIndex: {MeshLodIndex})";
         }
     }
 
@@ -216,6 +233,13 @@ namespace Unity.Rendering
         public DrawCommandSettings Settings;
         public int InstanceIndex;
         public float3 SortingWorldPosition;
+    }
+
+    internal struct MeshLodSelectionContext
+    {
+        public float3 CameraPosition;
+        public float SqrMeshLodSelectionConstant;
+        public bool IsOrtho;
     }
 
     internal struct DrawCommandBin
@@ -1028,13 +1052,16 @@ namespace Unity.Rendering
         [ReadOnly] public SharedComponentTypeHandle<LightMaps> LightMaps;
         [ReadOnly] public NativeParallelHashMap<int, BatchFilterSettings> FilterSettings;
         [ReadOnly] public NativeParallelHashMap<int, BRGRenderMeshArray> BRGRenderMeshArrays;
+        [ReadOnly] public ComponentTypeHandle<MeshLodInfoComponent> MeshLodInfoComponent;
+        [ReadOnly] public ComponentTypeHandle<WorldRenderBounds> BoundsComponent;
 
         public ChunkDrawCommandOutput DrawCommandOutput;
 
         public ulong SceneCullingMask;
-        public float3 CameraPosition;
         public uint LastSystemVersion;
         public uint CullingLayerMask;
+
+        public MeshLodSelectionContext MeshLodSelectionContext;
 
         public ProfilerMarker ProfilerEmitChunk;
 
@@ -1060,7 +1087,7 @@ namespace Unity.Rendering
             if (!BRGRenderMeshArrays.IsEmpty)
             {
                 int renderMeshArrayIndex = chunk.GetSharedComponentIndex(RenderMeshArray);
-                bool hasRenderMeshArray = renderMeshArrayIndex >= 0;
+                bool hasRenderMeshArray = renderMeshArrayIndex != -1;
                 if (hasRenderMeshArray)
                     BRGRenderMeshArrays.TryGetValue(renderMeshArrayIndex, out brgRenderMeshArray);
             }
@@ -1089,10 +1116,15 @@ namespace Unity.Rendering
                     return;
 #endif
 
+                bool hasMeshLod = chunk.Has(ref MeshLodInfoComponent);
+                var rendererFilterSettings = chunk.GetSharedComponent(RenderFilterSettings);
+                var meshLODInfos = hasMeshLod ? chunk.GetNativeArray(ref MeshLodInfoComponent) : default;
+                var worldBounds = chunk.GetNativeArray(ref BoundsComponent);
                 var materialMeshInfos = chunk.GetNativeArray(ref MaterialMeshInfo);
                 var localToWorlds = chunk.GetNativeArray(ref LocalToWorld);
+
                 bool isDepthSorted = chunk.Has(ref DepthSorted);
-                bool isLightMapped = chunk.GetSharedComponentIndex(LightMaps) >= 0;
+                bool isLightMapped = chunk.GetSharedComponentIndex(LightMaps) != -1;
 
                 // Check if the chunk has statically disabled motion (i.e. never in motion pass)
                 // or enabled motion (i.e. in motion pass if there was actual motion or force-to-zero).
@@ -1147,6 +1179,20 @@ namespace Unity.Rendering
                         if (isDepthSorted)
                             drawCommandFlags |= BatchDrawCommandFlags.HasSortingPosition;
 
+                        ushort lodIndex = 0;
+
+                        if (hasMeshLod)
+                        {
+                            var meshLodInfo = meshLODInfos[entityIndex];
+                            lodIndex = ComputeMeshLODLevel(
+                                ref meshLodInfo,
+                                rendererFilterSettings.MeshLodSelectionBias,
+                                MeshLodSelectionContext,
+                                worldBounds[entityIndex].Value,
+                                rendererFilterSettings.ForceMeshLod);
+
+                        }
+
                         if (materialMeshInfo.HasMaterialMeshIndexRange)
                         {
                             RangeInt matMeshIndexRange = materialMeshInfo.MaterialMeshIndexRange;
@@ -1169,7 +1215,8 @@ namespace Unity.Rendering
                                     MeshID = matMeshSubMesh.Mesh,
                                     SplitMask = splitMask,
                                     SubMeshIndex = (ushort)matMeshSubMesh.SubMeshIndex,
-                                    Flags = drawCommandFlags
+                                    Flags = drawCommandFlags,
+                                    MeshLodIndex = lodIndex
                                 };
 
                                 EmitDrawCommand(settings, j, bitIndex, chunkStartIndex, localToWorlds);
@@ -1198,7 +1245,8 @@ namespace Unity.Rendering
                                 MeshID = meshID,
                                 SplitMask = splitMask,
                                 SubMeshIndex = (ushort)materialMeshInfo.SubMesh,
-                                Flags = drawCommandFlags
+                                Flags = drawCommandFlags,
+                                MeshLodIndex = lodIndex
                             };
 
                             EmitDrawCommand(settings, j, bitIndex, chunkStartIndex, localToWorlds);
@@ -1241,7 +1289,38 @@ namespace Unity.Rendering
             return true;
 #endif
         }
+
+        private float GetCameraHeightAtDistanceSqr(float3 aabbCenter, float3 cameraPosition,
+            float meshLodSelectionConstant, bool isOrtho)
+        {
+            return isOrtho ? meshLodSelectionConstant :
+                math.lengthsq(aabbCenter - cameraPosition) * meshLodSelectionConstant;
+        }
+
+        // Algorithm is detailed and must be kept in sync with CalculateMeshLod (C++)  and ComputeMeshLODLevel in SRP
+        private ushort ComputeMeshLODLevel(ref MeshLodInfoComponent comp, float selectionBias, MeshLodSelectionContext lodSelectionContext, AABB worldAABB, int forceLod)
+        {
+            if (forceLod >= 0)
+                return (ushort)math.clamp(forceLod, 0, comp.lodCount-1);
+
+            var radiusSqr = math.max(math.lengthsq(worldAABB.Extents), 1e-5f);
+            var diameterSqr = radiusSqr * 4;
+            var cameraSqrHeightAtDistance = GetCameraHeightAtDistanceSqr(worldAABB.Center, lodSelectionContext.CameraPosition, lodSelectionContext.SqrMeshLodSelectionConstant, lodSelectionContext.IsOrtho);
+
+            var boundsDesiredPercentage = math.sqrt(cameraSqrHeightAtDistance / diameterSqr);
+
+            var levelIndexFlt = math.log2(boundsDesiredPercentage) * comp.lodSlope + comp.lodBias;
+
+            // We apply Bias after max to enforce that a positive bias of +N we would select lodN instead of Lod0
+            levelIndexFlt = math.max(levelIndexFlt, 0);
+            levelIndexFlt += selectionBias;
+
+            levelIndexFlt = math.clamp(levelIndexFlt,0, comp.lodCount - 1);
+
+            return (ushort)math.floor(levelIndexFlt);
+        }
     }
+
 
     [BurstCompile]
     internal unsafe struct AllocateWorkItemsJob : IJob
@@ -1612,7 +1691,7 @@ namespace Unity.Rendering
 
             output->drawCommandCount = drawCommandCount;
             output->drawCommands = ChunkDrawCommandOutput.Malloc<BatchDrawCommand>(drawCommandCount);
-            output->drawCommandPickingInstanceIDs = null;
+            output->drawCommandPickingEntityIds = null;
 
             // Worst case is one range per draw command, so this is an upper bound estimate.
             // The real count could be less.
@@ -1837,6 +1916,7 @@ namespace Unity.Rendering
                     sortingPosition = hasSortingPosition
                         ? (int)drawPositionFloatOffset
                         : 0,
+                    activeMeshLod = settings.MeshLodIndex
                 };
 
                 int drawCommandIndex = bin.DrawCommandOffset + i;

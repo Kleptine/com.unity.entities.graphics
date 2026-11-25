@@ -2,6 +2,8 @@ using Unity.Collections;
 using Unity.Entities;
 using UnityEngine;
 
+[assembly: RegisterGenericComponentType(typeof(CompanionComponent<Light>))]
+
 namespace Unity.Rendering
 {
     /// <summary>
@@ -34,9 +36,9 @@ namespace Unity.Rendering
         protected override void OnCreate()
         {
             m_LightBakingQuery = SystemAPI.QueryBuilder()
-                .WithAll<LightBakingOutputData, Light>()
+                .WithAll<LightBakingOutputData, CompanionComponent<Light>>()
                 .Build();
-            m_LightBakingQuery.SetChangedVersionFilter(ComponentType.ReadOnly<Light>());
+            m_LightBakingQuery.SetChangedVersionFilter(ComponentType.ReadOnly<CompanionComponent<Light>>());
         }
 
         /// <summary>
@@ -48,7 +50,7 @@ namespace Unity.Rendering
             foreach (var e in entities)
             {
                 var bakingOutput = EntityManager.GetComponentData<LightBakingOutputData>(e);
-                var light = EntityManager.GetComponentObject<Light>(e);
+                var light = EntityManager.GetCompanion<Light>(e);
 
                 if (light != null)
                     light.bakingOutput = bakingOutput.Value;

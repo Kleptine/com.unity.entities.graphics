@@ -69,6 +69,19 @@ namespace Unity.Entities.Graphics
         public bool StaticShadowCaster;
 
         /// <summary>
+        /// Indicates that the entity should always use the specified mesh LOD.
+        /// </summary>
+        /// <remarks>
+        /// A value of -1 indicates that the entity should use the LOD calculated internally
+        /// </remarks>
+        public int ForceMeshLod;
+
+        /// <summary>
+        /// Indicates the bias to apply to the mesh LOD selection.
+        /// </summary>
+        public float MeshLodSelectionBias;
+
+        /// <summary>
         /// Returns a new default instance of RenderFilterSettings.
         /// </summary>
         public static RenderFilterSettings Default => new RenderFilterSettings
@@ -79,6 +92,8 @@ namespace Unity.Entities.Graphics
             ShadowCastingMode = ShadowCastingMode.On,
             ReceiveShadows = true,
             StaticShadowCaster = false,
+            ForceMeshLod = -1,
+            MeshLodSelectionBias = 0.0f
         };
 
         /// <summary>
@@ -107,7 +122,14 @@ namespace Unity.Entities.Graphics
         /// <returns>Returns true if the current instance is equal to the specified RenderFilterSettings. Otherwise, returns false.</returns>
         public bool Equals(RenderFilterSettings other)
         {
-            return Layer == other.Layer && RenderingLayerMask == other.RenderingLayerMask && MotionMode == other.MotionMode && ShadowCastingMode == other.ShadowCastingMode && ReceiveShadows == other.ReceiveShadows && StaticShadowCaster == other.StaticShadowCaster;
+            return Layer == other.Layer
+                   && RenderingLayerMask == other.RenderingLayerMask
+                   && MotionMode == other.MotionMode
+                   && ShadowCastingMode == other.ShadowCastingMode
+                   && ReceiveShadows == other.ReceiveShadows
+                   && StaticShadowCaster == other.StaticShadowCaster
+                   && ForceMeshLod == other.ForceMeshLod
+                   && MeshLodSelectionBias == other.MeshLodSelectionBias;
         }
 
         /// <summary>

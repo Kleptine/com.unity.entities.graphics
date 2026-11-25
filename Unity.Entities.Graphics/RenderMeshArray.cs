@@ -1,9 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
-using Unity.Assertions;
+using UnityEngine.Assertions;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -18,6 +19,7 @@ namespace Unity.Rendering
     /// <summary>
     /// A struct storing material and mesh array indices.
     /// </summary>
+    [Serializable]
     public struct MaterialMeshIndex
     {
         public int MaterialIndex;
@@ -189,15 +191,15 @@ namespace Unity.Rendering
 
     internal struct AssetHash
     {
-        public static void UpdateAsset(ref xxHash3.StreamingState hash, UntypedUnityObjectRef asset)
+        public static void UpdateAsset(ref xxHash3.StreamingState hash, EntityId asset)
         {
             // In the editor we can compute a stable serializable hash using an asset GUID
 #if UNITY_EDITOR
-            bool success = AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset.instanceId, out string guid, out long localId);
+            bool success = AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out string guid, out long localId);
             hash.Update(success);
             if (!success)
             {
-                hash.Update(asset.instanceId);
+                hash.Update(asset);
                 return;
             }
             var guidBytes = Encoding.UTF8.GetBytes(guid);
@@ -209,7 +211,7 @@ namespace Unity.Rendering
 #else
             // In standalone, we have to resort to using the instance ID which is not serializable,
             // but should be usable in the context of this execution.
-            hash.Update(asset.instanceId);
+            hash.Update(asset);
 #endif
         }
     }
@@ -225,7 +227,8 @@ namespace Unity.Rendering
             EntityManager* em, ArchetypeChunk* chunks, int chunksLength,
             UnityObjectRef<Material>* materialsPtr, int materialsLength,
             UnityObjectRef<Mesh>* meshesPtr, int meshesLength,
-            MaterialMeshIndex* materialMeshIndicesPtr, int materialMeshIndicesLength);
+            MaterialMeshIndex* materialMeshIndicesPtr, int materialMeshIndicesLength,
+            SceneSection* sceneSection);
         static AddToDelegate s_AddToGCDefeat;
         static readonly SharedStatic<Functions> k_Functions = SharedStatic<Functions>.GetOrCreate<Functions>();
 
@@ -249,7 +252,8 @@ namespace Unity.Rendering
             EntityManager em, NativeArray<ArchetypeChunk> chunks,
             NativeArray<UnityObjectRef<Material>> materials,
             NativeArray<UnityObjectRef<Mesh>> meshes,
-            NativeArray<MaterialMeshIndex> materialMeshIndices)
+            NativeArray<MaterialMeshIndex> materialMeshIndices,
+            SceneSection sceneSection)
         {
             ((delegate* unmanaged[Cdecl] <
                 EntityManager*,
@@ -257,25 +261,29 @@ namespace Unity.Rendering
                 UnityObjectRef<Material>*, int,
                 UnityObjectRef<Mesh>*, int,
                 MaterialMeshIndex*, int,
+                SceneSection*,
                 void>)k_Functions.Data.AddTo)(
                     &em,
                     (ArchetypeChunk*)chunks.GetUnsafeReadOnlyPtr(), chunks.Length,
                     (UnityObjectRef<Material>*)materials.GetUnsafeReadOnlyPtr(), materials.Length,
                     (UnityObjectRef<Mesh>*)meshes.GetUnsafeReadOnlyPtr(), meshes.Length,
-                    (MaterialMeshIndex*)materialMeshIndices.GetUnsafeReadOnlyPtr(), materialMeshIndices.Length);
+                    (MaterialMeshIndex*)materialMeshIndices.GetUnsafeReadOnlyPtr(), materialMeshIndices.Length,
+                    &sceneSection);
         }
     }
 
     /// <summary>
     /// A shared component that contains meshes and materials.
     /// </summary>
-    public struct RenderMeshArray : ISharedComponentData, IEquatable<RenderMeshArray>
+    public struct RenderMeshArray : ISharedComponentData, IEquatable<RenderMeshArray>, IRefCounted
     {
-        [SerializeField] private UnityObjectRef<Material>[] m_Materials;
-        [SerializeField] private UnityObjectRef<Mesh>[] m_Meshes;
-        [SerializeField] private MaterialMeshIndex[] m_MaterialMeshIndices;
+        // Variable-length data lives on an internal ScriptableObject host so that
+        // RenderMeshArray itself is fully unmanaged (UnityObjectRef + uint4 = blittable).
+        // The hot path never reads the host — it goes through BRGRenderMeshArrays,
+        // a fully unmanaged side-table keyed by shared-component index.
+        [SerializeField] internal UnityObjectRef<RenderMeshArrayHost> m_Host;
 
-        // Memoize the expensive 128-bit hash
+        // Memoize the expensive 128-bit hash. Owned by the shared component; the host doesn't duplicate it.
         [SerializeField] private uint4 m_Hash128;
 
         /// <summary>
@@ -286,17 +294,17 @@ namespace Unity.Rendering
         /// <param name="materialMeshIndices">The array of MaterialMeshIndex to use in the RenderMeshArray.</param>
         public RenderMeshArray(Material[] materials, Mesh[] meshes, MaterialMeshIndex[] materialMeshIndices = null)
         {
-            m_Meshes = new UnityObjectRef<Mesh>[meshes.Length];
-            for (int i = 0; i < meshes.Length; i++)
-                m_Meshes[i] = meshes[i];
+            if (meshes == null || materials == null)
+                throw new ArgumentException("RenderMeshArray meshes and materials must be non-null.");
 
-            m_Materials = new UnityObjectRef<Material>[materials.Length];
-            for (int i = 0; i < materials.Length; i++)
-                m_Materials[i] = materials[i];
+            var host = ScriptableObject.CreateInstance<RenderMeshArrayHost>();
+            host.CreatedInMemory = true;
+            host.Meshes = (Mesh[])meshes.Clone();
+            host.Materials = (Material[])materials.Clone();
+            host.MaterialMeshIndices = materialMeshIndices?.ToArray();
 
-            m_MaterialMeshIndices = materialMeshIndices?.ToArray();
-            m_Hash128 = uint4.zero;
-            ResetHash128();
+            m_Host = host;
+            m_Hash128 = ComputeHash128(host);
         }
 
         /// <summary>
@@ -317,18 +325,29 @@ namespace Unity.Rendering
             ArchetypeChunk* chunksPtr, int chunksLength,
             UnityObjectRef<Material>* materialsPtr, int materialsLength,
             UnityObjectRef<Mesh>* meshesPtr, int meshesLength,
-            MaterialMeshIndex* materialMeshIndicesPtr, int materialMeshIndicesLength)
+            MaterialMeshIndex* materialMeshIndicesPtr, int materialMeshIndicesLength,
+            SceneSection* sceneSection)
         {
+            // Each section loads its own host, so arrays from different sections must not be equal
             var newArray = new RenderMeshArray(
                 new ReadOnlySpan<UnityObjectRef<Material>>(materialsPtr, materialsLength),
                 new ReadOnlySpan<UnityObjectRef<Mesh>>(meshesPtr, meshesLength),
-                new ReadOnlySpan<MaterialMeshIndex>(materialMeshIndicesPtr, materialMeshIndicesLength));
+                new ReadOnlySpan<MaterialMeshIndex>(materialMeshIndicesPtr, materialMeshIndicesLength),
+                *sceneSection);
+
+            // AddSharedComponent skips chunks that already have the component, so set those explicitly first.
+            var renderMeshArrayTypeHandle = (*em).GetSharedComponentTypeHandle<RenderMeshArray>();
+            for (int i = 0; i < chunksLength; i++)
+            {
+                if (chunksPtr[i].Has(renderMeshArrayTypeHandle))
+                    (*em).SetSharedComponent(chunksPtr[i], newArray);
+            }
 
             var chunkArray = NativeArrayUnsafeUtility.ConvertExistingDataToNativeArray<ArchetypeChunk>(chunksPtr, chunksLength, Allocator.None);
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             NativeArrayUnsafeUtility.SetAtomicSafetyHandle(ref chunkArray, AtomicSafetyHandle.GetTempMemoryHandle());
 #endif
-            (*em).AddSharedComponentManaged(chunkArray, newArray);
+            (*em).AddSharedComponent(chunkArray, newArray);
         }
 
         /// <summary>
@@ -338,12 +357,20 @@ namespace Unity.Rendering
         /// <param name="meshes">The array of meshes to use in the RenderMeshArray.</param>
         /// <param name="materialMeshIndices">The array of MaterialMeshIndex to use in the RenderMeshArray.</param>
         public RenderMeshArray(ReadOnlySpan<UnityObjectRef<Material>> materials, ReadOnlySpan<UnityObjectRef<Mesh>> meshes, ReadOnlySpan<MaterialMeshIndex> materialMeshIndices = default)
+            : this(materials, meshes, materialMeshIndices, default)
         {
-            m_Meshes = meshes.ToArray();
-            m_Materials = materials.ToArray();
-            m_MaterialMeshIndices = materialMeshIndices.ToArray();
-            m_Hash128 = uint4.zero;
-            ResetHash128();
+        }
+
+        RenderMeshArray(ReadOnlySpan<UnityObjectRef<Material>> materials, ReadOnlySpan<UnityObjectRef<Mesh>> meshes, ReadOnlySpan<MaterialMeshIndex> materialMeshIndices, SceneSection sceneSection)
+        {
+            var host = ScriptableObject.CreateInstance<RenderMeshArrayHost>();
+            host.CreatedInMemory = true;
+            host.Meshes = ToMeshArray(meshes);
+            host.Materials = ToMaterialArray(materials);
+            host.MaterialMeshIndices = materialMeshIndices.ToArray();
+
+            m_Host = host;
+            m_Hash128 = ComputeHash128(host, sceneSection);
         }
 
         /// <summary>
@@ -351,12 +378,9 @@ namespace Unity.Rendering
         /// </summary>
         public UnityObjectRef<Mesh>[] MeshReferences
         {
-            get => m_Meshes;
-            set
-            {
-                m_Hash128 = uint4.zero;
-                m_Meshes = value;
-            }
+            get => ToRefArray(MeshObjects);
+            [Obsolete("Setters on RenderMeshArray are deprecated; construct a new RenderMeshArray and re-apply it instead. RenderMeshArray will become immutable in a future release.", false)]
+            set => ReplaceHost(ToMeshArray(value), MaterialObjects, MaterialMeshIndices);
         }
 
         /// <summary>
@@ -364,12 +388,9 @@ namespace Unity.Rendering
         /// </summary>
         public UnityObjectRef<Material>[] MaterialReferences
         {
-            get => m_Materials;
-            set
-            {
-                m_Hash128 = uint4.zero;
-                m_Materials = value;
-            }
+            get => ToRefArray(MaterialObjects);
+            [Obsolete("Setters on RenderMeshArray are deprecated; construct a new RenderMeshArray and re-apply it instead. RenderMeshArray will become immutable in a future release.", false)]
+            set => ReplaceHost(MeshObjects, ToMaterialArray(value), MaterialMeshIndices);
         }
 
         /// <summary>
@@ -377,12 +398,145 @@ namespace Unity.Rendering
         /// </summary>
         public MaterialMeshIndex[] MaterialMeshIndices
         {
-            get => m_MaterialMeshIndices;
-            set
+            get => m_Host.Value != null ? m_Host.Value.MaterialMeshIndices : null;
+            [Obsolete("Setters on RenderMeshArray are deprecated; construct a new RenderMeshArray and re-apply it instead. RenderMeshArray will become immutable in a future release.", false)]
+            set => ReplaceHost(MeshObjects, MaterialObjects, value);
+        }
+
+        // Setter helper for the obsolete mutating API. The current host also backs the stored
+        // shared component value and every entity using it, so we never edit it in place: we build
+        // a fresh host with its own copies of the arrays and leave the old one untouched.
+        void ReplaceHost(Mesh[] meshes, Material[] materials, MaterialMeshIndex[] mmi)
+        {
+            // meshes/materials must be non-null; mmi is optional.
+            if (meshes == null || materials == null)
+                throw new ArgumentException("RenderMeshArray meshes and materials must be non-null.");
+
+            var newHost = ScriptableObject.CreateInstance<RenderMeshArrayHost>();
+            newHost.CreatedInMemory = true;
+            newHost.Meshes = (Mesh[])meshes.Clone();
+            newHost.Materials = (Material[])materials.Clone();
+            newHost.MaterialMeshIndices = mmi;
+            m_Host = newHost;
+            m_Hash128 = ComputeHash128(newHost);
+        }
+
+        // Direct access to the host's backing object arrays, avoiding the UnityObjectRef[]
+        // allocation that MeshReferences/MaterialReferences make on every get. Used by the
+        // in-package hot paths (registration, baking) that want the Mesh/Material objects.
+        internal Mesh[] MeshObjects => m_Host.Value != null ? m_Host.Value.Meshes : null;
+        internal Material[] MaterialObjects => m_Host.Value != null ? m_Host.Value.Materials : null;
+
+        static Mesh[] ToMeshArray(UnityObjectRef<Mesh>[] refs)
+        {
+            if (refs == null)
+                return null;
+            var result = new Mesh[refs.Length];
+            for (int i = 0; i < refs.Length; i++)
+                result[i] = refs[i];
+            return result;
+        }
+
+        static Material[] ToMaterialArray(UnityObjectRef<Material>[] refs)
+        {
+            if (refs == null)
+                return null;
+            var result = new Material[refs.Length];
+            for (int i = 0; i < refs.Length; i++)
+                result[i] = refs[i];
+            return result;
+        }
+
+        static Mesh[] ToMeshArray(ReadOnlySpan<UnityObjectRef<Mesh>> refs)
+        {
+            var result = new Mesh[refs.Length];
+            for (int i = 0; i < refs.Length; i++)
+                result[i] = refs[i];
+            return result;
+        }
+
+        static Material[] ToMaterialArray(ReadOnlySpan<UnityObjectRef<Material>> refs)
+        {
+            var result = new Material[refs.Length];
+            for (int i = 0; i < refs.Length; i++)
+                result[i] = refs[i];
+            return result;
+        }
+
+        static UnityObjectRef<Mesh>[] ToRefArray(Mesh[] objects)
+        {
+            if (objects == null)
+                return null;
+            var result = new UnityObjectRef<Mesh>[objects.Length];
+            for (int i = 0; i < objects.Length; i++)
+                result[i] = objects[i];
+            return result;
+        }
+
+        static UnityObjectRef<Material>[] ToRefArray(Material[] objects)
+        {
+            if (objects == null)
+                return null;
+            var result = new UnityObjectRef<Material>[objects.Length];
+            for (int i = 0; i < objects.Length; i++)
+                result[i] = objects[i];
+            return result;
+        }
+
+        struct HostRefDelta
+        {
+            public UnityObjectRef<RenderMeshArrayHost> Host;
+            public int Delta;
+        }
+
+        // Host reference-count deltas, applied on the main thread in ProcessPendingHostReleases.
+        // Retain/Release run on arbitrary threads (subscene deserialization invokes them from a
+        // loader thread), where resolving the host (UnityObjectRef.Value) or destroying it is
+        // illegal, so they only record the delta here.
+        static readonly ConcurrentQueue<HostRefDelta> k_SPendingHostRefDeltas = new();
+
+        /// <summary>
+        /// Called by the Entities runtime when an instance of this shared component is added to a
+        /// world. Counts the world against the backing host so it can be released deterministically.
+        /// </summary>
+        public void Retain() => RecordHostRefDelta(1);
+
+        /// <summary>
+        /// Called by the Entities runtime when the last instance of this shared component is removed
+        /// from a world. The backing host is destroyed once no world references it.
+        /// </summary>
+        public void Release() => RecordHostRefDelta(-1);
+
+        void RecordHostRefDelta(int delta)
+        {
+            // Plain field read (no host resolution), so it is safe off the main thread.
+            if (m_Host.EntityId != EntityId.None)
+                k_SPendingHostRefDeltas.Enqueue(new HostRefDelta { Host = m_Host, Delta = delta });
+        }
+
+        // Applies the queued host reference-count deltas and destroys any host no world references
+        // anymore. Deltas are summed before destroying so an add/remove of the same host within one
+        // batch nets out correctly. Must be called on the main thread.
+        internal static void ProcessPendingHostReleases()
+        {
+            if (k_SPendingHostRefDeltas.IsEmpty)
+                return;
+
+            var touched = new List<RenderMeshArrayHost>();
+            while (k_SPendingHostRefDeltas.TryDequeue(out var delta))
             {
-                m_Hash128 = uint4.zero;
-                m_MaterialMeshIndices = value;
+                var host = delta.Host.Value;
+                if (host == null)
+                    continue;
+                host.RefCount += delta.Delta;
+                touched.Add(host);
             }
+
+            // Only destroy hosts we created in memory. Hosts loaded from a subscene or prefab are
+            // owned by the content loading system and must not be destroyed here.
+            foreach (var host in touched)
+                if (host != null && host.RefCount <= 0 && host.CreatedInMemory)
+                    UnityEngine.Object.DestroyImmediate(host);
         }
 
         /// <summary>
@@ -393,25 +547,10 @@ namespace Unity.Rendering
         {
             get
             {
-                if (m_Meshes == null)
-                    return null;
-                var meshesArray = new Mesh[m_Meshes.Length];
-                for (int i = 0; i < m_Meshes.Length; i++)
-                {
-                    meshesArray[i] = m_Meshes[i].Value;
-                }
-                return meshesArray;
+                var meshes = MeshObjects;
+                return meshes != null ? (Mesh[])meshes.Clone() : null;
             }
-            set
-            {
-                m_Hash128 = uint4.zero;
-
-                m_Meshes = new UnityObjectRef<Mesh>[value.Length];
-                for (int i = 0; i < value.Length; i++)
-                {
-                    m_Meshes[i] = value[i];
-                }
-            }
+            set => ReplaceHost(value, MaterialObjects, MaterialMeshIndices);
         }
 
         /// <summary>
@@ -422,25 +561,10 @@ namespace Unity.Rendering
         {
             get
             {
-                if (m_Materials == null)
-                    return null;
-                var materialsArray = new Material[m_Materials.Length];
-                for (int i = 0; i < m_Materials.Length; i++)
-                {
-                    materialsArray[i] = m_Materials[i].Value;
-                }
-                return materialsArray;
+                var materials = MaterialObjects;
+                return materials != null ? (Material[])materials.Clone() : null;
             }
-            set
-            {
-                m_Hash128 = uint4.zero;
-
-                m_Materials = new UnityObjectRef<Material>[value.Length];
-                for (int i = 0; i < value.Length; i++)
-                {
-                    m_Materials[i] = value[i];
-                }
-            }
+            set => ReplaceHost(MeshObjects, value, MaterialMeshIndices);
         }
 
         internal Mesh GetMeshWithStaticIndex(int staticMeshIndex)
@@ -450,7 +574,7 @@ namespace Unity.Rendering
             if (staticMeshIndex >= 0)
                 return null;
 
-            return m_Meshes[MaterialMeshInfo.StaticIndexToArrayIndex(staticMeshIndex)];
+            return m_Host.Value.Meshes[MaterialMeshInfo.StaticIndexToArrayIndex(staticMeshIndex)];
         }
 
         internal Material GetMaterialWithStaticIndex(int staticMaterialIndex)
@@ -460,7 +584,7 @@ namespace Unity.Rendering
             if (staticMaterialIndex >= 0)
                 return null;
 
-            return m_Materials[MaterialMeshInfo.StaticIndexToArrayIndex(staticMaterialIndex)];
+            return m_Host.Value.Materials[MaterialMeshInfo.StaticIndexToArrayIndex(staticMaterialIndex)];
         }
 
         /// <summary>
@@ -476,41 +600,63 @@ namespace Unity.Rendering
         }
 
         /// <summary>
-        /// Recalculates the 128-bit hash value of the component.
+        /// Does nothing. The 128-bit hash value is computed when the RenderMeshArray is constructed.
         /// </summary>
+        [Obsolete("ResetHash128 is deprecated; the hash is computed automatically when the RenderMeshArray is constructed. This method will be removed in a future release.", false)]
         public void ResetHash128()
         {
-            m_Hash128 = ComputeHash128();
+            // Recomputing the hash would drop the scene section that baking adds to it
         }
 
         /// <summary>
-        /// Calculates and returns the 128-bit hash value of the component contents.
+        /// Returns the 128-bit hash value of the component.
         /// </summary>
         /// <remarks>
-        /// This is equivalent to calling <see cref="ResetHash128"/> and then <see cref="GetHash128"/>.
+        /// This is equivalent to calling <see cref="GetHash128"/>.
         /// </remarks>
-        /// <returns>Returns the calculated 128-bit hash value.</returns>
+        /// <returns>Returns the 128-bit hash value.</returns>
+        [Obsolete("ComputeHash128 is deprecated; use GetHash128 instead. The hash is computed automatically when the RenderMeshArray is constructed and the result is identical. This method will be removed in a future release.", false)]
         public uint4 ComputeHash128()
+        {
+            return GetHash128();
+        }
+
+        internal static uint4 ComputeHash128(RenderMeshArrayHost host) => ComputeHash128(host, default);
+
+        static uint4 ComputeHash128(RenderMeshArrayHost host, SceneSection sceneSection)
         {
             var hash = new xxHash3.StreamingState(false);
 
-            int numMeshes = m_Meshes?.Length ?? 0;
-            int numMaterials = m_Materials?.Length ?? 0;
-            int numMatMeshIndices = m_MaterialMeshIndices?.Length ?? 0;
+            hash.Update(sceneSection.SceneGUID);
+            hash.Update(sceneSection.Section);
+
+            var meshes              = host != null ? host.Meshes              : null;
+            var materials           = host != null ? host.Materials           : null;
+            var materialMeshIndices = host != null ? host.MaterialMeshIndices : null;
+
+            int numMeshes           = meshes?.Length              ?? 0;
+            int numMaterials        = materials?.Length           ?? 0;
+            int numMatMeshIndices   = materialMeshIndices?.Length ?? 0;
 
             hash.Update(numMeshes);
             hash.Update(numMaterials);
             hash.Update(numMatMeshIndices);
 
             for (int i = 0; i < numMeshes; ++i)
-                AssetHash.UpdateAsset(ref hash, m_Meshes[i].Id);
+            {
+                UnityObjectRef<Mesh> meshRef = meshes[i];
+                AssetHash.UpdateAsset(ref hash, meshRef.EntityId);
+            }
 
             for (int i = 0; i < numMaterials; ++i)
-                AssetHash.UpdateAsset(ref hash, m_Materials[i].Id);
+            {
+                UnityObjectRef<Material> materialRef = materials[i];
+                AssetHash.UpdateAsset(ref hash, materialRef.EntityId);
+            }
 
             for (int i = 0; i < numMatMeshIndices; ++i)
             {
-                MaterialMeshIndex matMeshIndex = m_MaterialMeshIndices[i];
+                MaterialMeshIndex matMeshIndex = materialMeshIndices[i];
                 hash.Update(matMeshIndex.MaterialIndex);
                 hash.Update(matMeshIndex.MeshIndex);
                 hash.Update(matMeshIndex.SubMeshIndex);
@@ -588,8 +734,13 @@ namespace Unity.Rendering
 
             foreach (var rma in renderMeshArrays)
             {
-                totalMeshes += rma.MeshReferences?.Length ?? 0;
-                totalMaterials += rma.MeshReferences?.Length ?? 0;
+                if (rma.MeshObjects == null || rma.MaterialObjects == null)
+                    throw new ArgumentException(
+                        "Cannot combine a RenderMeshArray that has no backing data (it is default-initialized or its host has been unloaded).",
+                        nameof(renderMeshArrays));
+
+                totalMeshes += rma.MeshObjects.Length;
+                totalMaterials += rma.MaterialObjects.Length;
             }
 
             var meshes = new Dictionary<UnityObjectRef<Mesh>, bool>(totalMeshes);
@@ -597,15 +748,15 @@ namespace Unity.Rendering
 
             foreach (var rma in renderMeshArrays)
             {
-                foreach (var mesh in rma.MeshReferences)
+                foreach (var mesh in rma.MeshObjects)
                 {
-                    if (mesh.IsValid())
+                    if (mesh != null)
                         meshes[mesh] = true;
                 }
 
-                foreach (var material in rma.MaterialReferences)
+                foreach (var material in rma.MaterialObjects)
                 {
-                    if (material.IsValid())
+                    if (material != null)
                         materials[material] = true;
                 }
             }
@@ -672,11 +823,11 @@ namespace Unity.Rendering
                 Assert.IsTrue(range.length > 0);
 
                 int firstMaterialIndex = MaterialMeshIndices[range.start].MaterialIndex;
-                return MaterialReferences[firstMaterialIndex];
+                return MaterialObjects[firstMaterialIndex];
             }
             else
             {
-                return MaterialReferences[materialMeshInfo.MaterialArrayIndex];
+                return MaterialObjects[materialMeshInfo.MaterialArrayIndex];
             }
         }
 
@@ -700,14 +851,14 @@ namespace Unity.Rendering
                 for (int i = range.start; i < range.end; i++)
                 {
                     int materialIndex = MaterialMeshIndices[i].MaterialIndex;
-                    materials.Add(MaterialReferences[materialIndex]);
+                    materials.Add(MaterialObjects[materialIndex]);
                 }
 
                 return materials;
             }
             else
             {
-                var material = MaterialReferences[materialMeshInfo.MaterialArrayIndex];
+                var material = MaterialObjects[materialMeshInfo.MaterialArrayIndex];
                 return new List<Material> { material };
             }
         }
@@ -729,11 +880,11 @@ namespace Unity.Rendering
                 Assert.IsTrue(range.length > 0);
 
                 int firstMeshIndex = MaterialMeshIndices[range.start].MeshIndex;
-                return MeshReferences[firstMeshIndex];
+                return MeshObjects[firstMeshIndex];
             }
             else
             {
-                return MeshReferences[materialMeshInfo.MeshArrayIndex];
+                return MeshObjects[materialMeshInfo.MeshArrayIndex];
             }
         }
 
